@@ -113,7 +113,7 @@ func Receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error){
 	return *reply, nil
 }
 
-func ping(host string, protocol ipVersion) {
+func Ping(host string, protocol ipVersion) {
 	timeout := time.Second / 1000 * 100
 	log.SetLevel(log.InfoLevel)
 
