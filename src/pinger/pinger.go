@@ -13,7 +13,6 @@ import (
 )
 
 // TODO: Add linting
-// TODO: Add argument parsing for `n` requests
 
 type ipVersion int
 type ipNumber int
