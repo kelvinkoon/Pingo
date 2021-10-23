@@ -1,4 +1,4 @@
-package main
+package pinger
 
 import (
 	"os"
@@ -13,8 +13,7 @@ import (
 )
 
 // TODO: Add linting
-// TODO: Add IPv4 / IPv6 option
-// TODO: Add TTL as optional arg
+// TODO: Add argument parsing for `n` requests
 
 type ipVersion int
 type ipNumber int
@@ -35,7 +34,7 @@ type EchoReply struct {
 	msg *icmp.Message
 }
 
-func resolveHost(host string, ip ipVersion) (string, error){
+func ResolveHost(host string, ip ipVersion) (string, error){
 	addrs, err := net.LookupHost(host)
 	var addr string
 	if err != nil {
@@ -52,7 +51,7 @@ func resolveHost(host string, ip ipVersion) (string, error){
 	return addr, nil
 }
 
-func initICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, error) {
+func InitICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, error) {
 	var listenIPType string
 	var listenAddr string
 
@@ -73,7 +72,7 @@ func initICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, erro
 	return conn, nil
 }
 
-func buildPacket(ip ipVersion, seqNum int) (icmp.Message) {
+func BuildPacket(ip ipVersion, seqNum int) (icmp.Message) {
 	var proto icmp.Type
 	switch ip {
 	case IPV6:
@@ -95,7 +94,7 @@ func buildPacket(ip ipVersion, seqNum int) (icmp.Message) {
 	return packet
 }
 
-func receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error){
+func Receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error){
 	reply := new(EchoReply)
 	buffer := make([]byte, 66507)
     n, peer, err := conn.ReadFrom(buffer)
@@ -118,11 +117,11 @@ func ping(host string, protocol ipVersion) {
 	timeout := time.Second / 1000 * 100
 	log.SetLevel(log.InfoLevel)
 
-	addr, err := resolveHost(host, protocol)
+	addr, err := ResolveHost(host, protocol)
 	if err != nil {
 		log.Fatal("Could not resolve hostname.", err)
 	}
-	conn, err := initICMPListen(protocol, timeout)
+	conn, err := InitICMPListen(protocol, timeout)
 	if err != nil {
 		log.Fatal("Could not establish listener.", err)
 	}
@@ -130,7 +129,7 @@ func ping(host string, protocol ipVersion) {
 
 	packetNum := 1
 	for {
-		packet := buildPacket(protocol, packetNum)
+		packet := BuildPacket(protocol, packetNum)
 		packetM, err := packet.Marshal(nil)
 		if err != nil {
 			log.Fatal(err)
@@ -146,7 +145,7 @@ func ping(host string, protocol ipVersion) {
 		sendTime := time.Now()
 		// Receive ICMP echo
 		err = conn.SetReadDeadline(time.Now().Add(timeout))
-		reply, err := receive(conn, protocol)
+		reply, err := Receive(conn, protocol)
 		recvTime := time.Since(sendTime).Round(time.Millisecond)
 
 		// Register request timed out
@@ -168,9 +167,4 @@ func ping(host string, protocol ipVersion) {
 		packetNum++
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func main() {
-	ip := IPV4
-	ping("google.com", ip)
 }
