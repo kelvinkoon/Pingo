@@ -20,6 +20,7 @@ INFO[0001] Reply from 99.84.238.127: bytes=32 time=17ms
 
 ```
 sudo go run src/client/main.go -host=google.com -ip=6
+
 INFO[0000] Reply from 2607:f8b0:4005:80f::200e: bytes=32 time=15ms
 INFO[0001] Reply from 2607:f8b0:4005:80f::200e: bytes=32 time=21ms
 ```
