@@ -1,56 +1,71 @@
 package pinger
 
 import (
-	"os"
-	"time"
-	"net"
-	"strings"
 	"errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+	"net"
+	"os"
+	"strings"
+	"time"
 )
-
-// TODO: Add linting
 
 type ipVersion int
 type ipNumber int
 
 const (
-	IPV4 ipVersion = iota
-	IPV6 ipVersion = iota
+	IPV4    ipVersion = iota
+	IPV6    ipVersion = iota
+	UNKNOWN ipVersion = iota
 )
 
-var protocolToNumber = map[ipVersion]int {
+var protocolToNumber = map[ipVersion]int{
 	IPV4: 1,
 	IPV6: 58,
 }
 
 type EchoReply struct {
-	n int
+	n    int
 	peer net.Addr
-	msg *icmp.Message
+	msg  *icmp.Message
 }
 
-func ResolveHost(host string, ip ipVersion) (string, error){
+func init() {
+	log.SetLevel(log.InfoLevel)
+}
+
+func resolveHost(host string, ip ipVersion) (string, error) {
+	var selectedAddr string
+	var ipv4Addr string
+	var ipv6Addr string
+
 	addrs, err := net.LookupHost(host)
-	var addr string
 	if err != nil {
 		return "", err
 	}
+
+	// If single address given, assume IPv4 only
+	if len(addrs) == 1 {
+		ipv4Addr = addrs[0]
+	} else {
+		ipv4Addr = addrs[1]
+		ipv6Addr = addrs[0]
+	}
+
 	switch ip {
 	case IPV6:
-		addr = addrs[0]
+		selectedAddr = ipv6Addr
 	case IPV4:
-		addr = addrs[1]
+		selectedAddr = ipv4Addr
 	default:
 		log.Fatal("Invalid IP version detected on resolve.")
 	}
-	return addr, nil
+	return selectedAddr, nil
 }
 
-func InitICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, error) {
+func initICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, error) {
 	var listenIPType string
 	var listenAddr string
 
@@ -71,7 +86,7 @@ func InitICMPListen(ip ipVersion, timeout time.Duration) (*icmp.PacketConn, erro
 	return conn, nil
 }
 
-func BuildPacket(ip ipVersion, seqNum int) (icmp.Message) {
+func buildPacket(ip ipVersion, seqNum int) icmp.Message {
 	var proto icmp.Type
 	switch ip {
 	case IPV6:
@@ -80,12 +95,12 @@ func BuildPacket(ip ipVersion, seqNum int) (icmp.Message) {
 		proto = ipv4.ICMPTypeEcho
 	}
 
-	packet := icmp.Message {
-		Type: proto, 
+	packet := icmp.Message{
+		Type: proto,
 		Code: 0,
-		Body: &icmp.Echo {
-			ID: os.Getpid(), 
-			Seq: seqNum,
+		Body: &icmp.Echo{
+			ID:   os.Getpid(),
+			Seq:  seqNum,
 			Data: []byte("moshi moshi moshi moshi!"),
 		},
 	}
@@ -93,18 +108,19 @@ func BuildPacket(ip ipVersion, seqNum int) (icmp.Message) {
 	return packet
 }
 
-func Receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error){
+func receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error) {
 	reply := new(EchoReply)
 	buffer := make([]byte, 66507)
-    n, peer, err := conn.ReadFrom(buffer)
-    if err != nil {
+	n, peer, err := conn.ReadFrom(buffer)
+	if err != nil {
 		return *reply, err
-    }
+	}
 
-    msg, err := icmp.ParseMessage(protocolToNumber[protocol], buffer[:n])
-    if err != nil {
-        log.Fatal(err)
-    }
+	msg, err := icmp.ParseMessage(protocolToNumber[protocol], buffer[:n])
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	reply.n = n
 	reply.msg = msg
 	reply.peer = peer
@@ -114,13 +130,16 @@ func Receive(conn *icmp.PacketConn, protocol ipVersion) (EchoReply, error){
 
 func Ping(host string, protocol ipVersion) {
 	timeout := time.Second / 1000 * 100
-	log.SetLevel(log.InfoLevel)
 
-	addr, err := ResolveHost(host, protocol)
+	addr, err := resolveHost(host, protocol)
 	if err != nil {
 		log.Fatal("Could not resolve hostname.", err)
 	}
-	conn, err := InitICMPListen(protocol, timeout)
+	if addr == "" {
+		log.Fatal("Hostname could not be resolved, likely due to host supporting IPv4 only.")
+	}
+
+	conn, err := initICMPListen(protocol, timeout)
 	if err != nil {
 		log.Fatal("Could not establish listener.", err)
 	}
@@ -128,7 +147,7 @@ func Ping(host string, protocol ipVersion) {
 
 	packetNum := 1
 	for {
-		packet := BuildPacket(protocol, packetNum)
+		packet := buildPacket(protocol, packetNum)
 		packetM, err := packet.Marshal(nil)
 		if err != nil {
 			log.Fatal(err)
@@ -144,7 +163,7 @@ func Ping(host string, protocol ipVersion) {
 		sendTime := time.Now()
 		// Receive ICMP echo
 		err = conn.SetReadDeadline(time.Now().Add(timeout))
-		reply, err := Receive(conn, protocol)
+		reply, err := receive(conn, protocol)
 		recvTime := time.Since(sendTime).Round(time.Millisecond)
 
 		// Register request timed out
@@ -152,7 +171,7 @@ func Ping(host string, protocol ipVersion) {
 			log.Info("Request timed out.")
 			time.Sleep(1 * time.Second)
 			continue
-		} 
+		}
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -161,8 +180,9 @@ func Ping(host string, protocol ipVersion) {
 		case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
 			log.Printf("Reply from %v: bytes=%d time=%s", reply.peer, reply.n, recvTime)
 		default:
-			log.Warn("Ignoring non-ICMP reply.")
+			log.Debug("Ignoring non-ICMP reply.")
 		}
+
 		packetNum++
 		time.Sleep(1 * time.Second)
 	}
